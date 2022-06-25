@@ -3,7 +3,7 @@ import type {Message} from 'discord.js';
 import dotenv from 'dotenv';
 import { initializeApp } from "firebase/app";
 import { doc, setDoc, getFirestore, collection, getDocs } from "firebase/firestore";
-import { getOrders } from './woocommerce';
+import WooCommerceRestApi from '@woocommerce/woocommerce-rest-api';
 
 dotenv.config();
 
@@ -16,6 +16,13 @@ const firebaseConfig = {
     appId: "1:18943284273:web:3010f95c36d468ded3f110"
 };
 
+const WooCommerce = new WooCommerceRestApi({
+    url: 'https://sportstemplates.net',
+    consumerKey: 'ck_e0fd19c1f911c57a765bb45f1c0042e5492b7397',
+    consumerSecret: 'cs_e82c4e66a80570488470d9481261096a9faf07a9',
+    version: 'wc/v3'
+});
+
 const app = initializeApp(firebaseConfig);
 const db = getFirestore();
 const addressRef = collection(db, "addresses");
@@ -24,6 +31,12 @@ interface DataItem {
     discordUsername: string;
     email: string;
     walletAddress: string;
+}
+
+interface Order {
+    discordUsername: string;
+    email: string;
+    orderNumber: string;
 }
 
 const client = new DiscordJS.Client({
@@ -36,6 +49,8 @@ const client = new DiscordJS.Client({
 
 const prefix = '?';
 
+let orders: Order[] = [];
+
 client.on('ready', () => {
     console.log('Botty: I am online.')
 })
@@ -45,16 +60,16 @@ client.on('messageCreate', (message) => {
     if(message.author.id != client.user?.id) {
         switch (command[0]) {
             case `${prefix}whitelist`:
-                getWhitelist(message, command);
+                runFunction(postWhitelist(message, command), command);
                 break;
             case `${prefix}help`:
-                getHelp(message);
+                runFunction(getHelp(message), command);
                 break;
             case `${prefix}list`:
-                getList(message, command);
+                runFunction(getList(message, command), command);
                 break;
-            case `${prefix}test`:
-                testFunction(message);
+            case `${prefix}verify-purchase`:
+                runFunction(verifyPurchase(message, command), command);
                 break;
             default:
                 break;
@@ -64,16 +79,111 @@ client.on('messageCreate', (message) => {
 
 client.login(process.env.TOKEN);
 
+function runFunction(func: void | Promise<void>, command :string[]) {
+    console.log("Command: ", command.join())
+    func;
+}
+
 async function setValue(data: DataItem, authorId: string) {
     await setDoc(doc(db, "addresses", authorId), data);
 }
 
-function testFunction(message: Message) {
-    getOrders();
-    message.reply("Testing...");
+async function verifyPurchase(message: Message, command: string[]) {
+    let newOrder: Order = {
+        discordUsername: message.author.id,
+        email: command[1],
+        orderNumber: command[2]
+    };
+
+    if (command.length <= 1) {
+        const commandEmbed = new MessageEmbed()
+                .setColor('RANDOM')
+                .setTitle('Enter your Order Details')
+                .setAuthor('Credentials','https://cdn.discordapp.com/attachments/909881951639437392/951144533670903849/Attachment_1646840820-1.jpeg')
+                .setDescription(`<@${message.author.id}> Please Enter Your email and Order Number e.g. /verify-purchase user@memail.com 457345`)
+                .setImage('https://cdn.discordapp.com/attachments/909881951639437392/951144533670903849/Attachment_1646840820-1.jpeg')
+                .setTimestamp(new Date())
+                .setFooter('Kindly ensure your credentials are in correct format',)
+            message.channel.send({
+                embeds:[commandEmbed]
+            })
+            return;
+    }
+
+    let currentUser = orders.find(o => o.orderNumber === newOrder.orderNumber)?.discordUsername;
+    if (currentUser) {
+        const commandEmbed = new MessageEmbed()
+                .setColor('RANDOM')
+                .setTitle('Order Number Already In Use')
+                .setAuthor('Credentials','https://cdn.discordapp.com/attachments/909881951639437392/951144533670903849/Attachment_1646840820-1.jpeg')
+                .setDescription(`<@${message.author.id}> The Order number is already in use by <@${currentUser}>`)
+                .setImage('https://cdn.discordapp.com/attachments/909881951639437392/951144533670903849/Attachment_1646840820-1.jpeg')
+                .setTimestamp(new Date())
+                .setFooter('Kindly ensure your enter valid order number',)
+            message.channel.send({
+                embeds:[commandEmbed]
+            })
+            return;
+    }
+
+    WooCommerce.get(`orders/${command[2]}`)
+        .then((response) => {
+            if (response.data.billing.email != command[1]) {
+                const commandEmbed = new MessageEmbed()
+                        .setColor('RANDOM')
+                        .setTitle('Invalid Email')
+                        .setAuthor('Credentials','https://cdn.discordapp.com/attachments/909881951639437392/951144533670903849/Attachment_1646840820-1.jpeg')
+                        .setDescription(`<@${message.author.id}> Please enter the email you used for your purchase`)
+                        .setImage('https://cdn.discordapp.com/attachments/909881951639437392/951144533670903849/Attachment_1646840820-1.jpeg')
+                        .setTimestamp(new Date())
+                        .setFooter('Kindly re-check your email',)
+                    message.channel.send({
+                        embeds:[commandEmbed]
+                    })
+                    return;
+            }
+
+            let role = message.guild?.roles.cache.find(r => r.name.toLowerCase().includes("champions"));
+            if (role == undefined) {
+                message.guild?.roles.create({
+                    name: 'Champions'
+                })
+            }
+            role = message.guild?.roles.cache.find(r => r.name.toLowerCase().includes("champions"));
+            if (role != undefined) {
+                message.member?.roles.add(role);
+            }
+            orders.push(newOrder);
+            const commandEmbed = new MessageEmbed()
+                        .setColor('RANDOM')
+                        .setTitle('Success')
+                        .setAuthor('Credentials','https://cdn.discordapp.com/attachments/909881951639437392/951144533670903849/Attachment_1646840820-1.jpeg')
+                        .setDescription(`<@${message.author.id}> Thank you for verifying your Purchase.`)
+                        .setImage('https://cdn.discordapp.com/attachments/909881951639437392/951144533670903849/Attachment_1646840820-1.jpeg')
+                        .setTimestamp(new Date())
+                        .setFooter('Success.',)
+                    message.channel.send({
+                        embeds:[commandEmbed]
+                    })
+                    return;
+        })
+        .catch((error) => {
+            const commandEmbed = new MessageEmbed()
+                        .setColor('RANDOM')
+                        .setTitle('Your Order Does Not Exist')
+                        .setAuthor('Credentials','https://cdn.discordapp.com/attachments/909881951639437392/951144533670903849/Attachment_1646840820-1.jpeg')
+                        .setDescription(`<@${message.author.id}> This Order Number does not exist`)
+                        .setImage('https://cdn.discordapp.com/attachments/909881951639437392/951144533670903849/Attachment_1646840820-1.jpeg')
+                        .setTimestamp(new Date())
+                        .setFooter('Kindly re-check your order number',)
+                    message.channel.send({
+                        embeds:[commandEmbed]
+                    })
+                    return;
+        });
 }
 
-function getWhitelist(message: Message, command: string[]) {
+function postWhitelist(message: Message, command: string[]) {
     if (message.member?.roles.cache.find(role => role.name.toLowerCase() == 'whitelist')) {
         if (command.length <= 1) {
             const commandEmbed = new MessageEmbed()
