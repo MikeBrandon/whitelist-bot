@@ -13,7 +13,7 @@
   "dependencies": {
     "@woocommerce/woocommerce-rest-api": "^1.0.1",
     "discord.js": "^13.6.0",
-    "dotenv": "^16.0.0",
+    "dotenv": "^16.0.1",
     "firebase": "^9.6.8",
     "ts-node": "^10.7.0",
     "typescript": "^4.6.2"
